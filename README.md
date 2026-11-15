@@ -1,6 +1,18 @@
-# Profile Bar Region Plugin — Oracle APEX
+# Profile Bar — Oracle APEX Region Plugin
 
-**By Hassaan Ahmed Tahir — Senior Oracle APEX Developer | [Read the full tutorial on APEX with Hassaan](https://apexwithhassaan.vercel.app/blog/profile-bar-region-plugin)**
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![Oracle APEX](https://img.shields.io/badge/Oracle%20APEX-Region%20Plugin-F80000)
+![PL/SQL](https://img.shields.io/badge/PL%2FSQL-Oracle-blue)
+![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E)
+![Version](https://img.shields.io/badge/version-1.3.0-informational)
+
+> A navbar user menu for Oracle APEX: avatar, name and email from the database, a SQL-driven dropdown, and four logout button styles.
+
+<p align="center">
+  <img src="docs/images/profile-bar-dropdown.png" alt="Profile Bar dropdown open with avatar, name, email, menu items and Sign Out" width="230">
+</p>
+
+**By Hassaan Ahmed Tahir — Senior Oracle APEX Developer · [Read the full tutorial](https://apexwithhassaan.vercel.app/blog/profile-bar-region-plugin)**
 
 A fully custom, self-contained **Region Plugin** that renders a navbar user menu: the logged-in user's avatar (photo, initials, or a live status dot), name and email, a **query-driven dropdown menu**, and a logout button that can sit inside the dropdown or outside it in any of **four visual styles**.
 
@@ -10,16 +22,34 @@ Instead of cobbling a user menu together from a List region, template overrides 
 
 ---
 
-## 📦 What's in this repo
+## ✨ Features
 
-| File | Description |
-|---|---|
-| `profile_bar.sql` | PL/SQL render function — the source code registered in the plugin's Source section |
-| `profile_bar.css` | Stylesheet — trigger, avatar, status dot, four logout button styles, dropdown panel and swipe-in/out animations |
-| `profile_bar.js` | Client-side behavior — `SH_USER_MENU` namespace: portal pattern, open/close with animation, keyboard navigation |
-| `README.md` | This guide — how the plugin is structured and built, step by step |
+- **Avatar** — profile photo from a URL or a BLOB column (embedded as Base64, up to 300 KB), initials fallback, optional status dot, three shapes
+- **DB-driven identity** — name, email and photo as plain text *or* live `TABLE.MATCH_COLUMN.VALUE_COLUMN` lookups against `APP_USER`
+- **SQL-driven dropdown** — icon / text / link / menu type from your own query, with sub-items and per-icon colors
+- **Four logout styles** — inside the dropdown or outside as a button, switched purely by CSS class
+- **Polished interaction** — swipe-in / swipe-out animation, full keyboard support, portal pattern so no navbar can clip the panel
+- **Readable by default** — hover text color is picked automatically from your hover background
+- **Bilingual** — the plugin's own strings switch between English and German
+- **Zero external libraries** — native PL/SQL, CSS and vanilla JavaScript
 
-> ⚠️ **Note:** These three files are for reading and reuse. To install the plugin into your own APEX workspace, build it by following the steps below and pasting each file's content into the matching section of the plugin definition — Source, Files (CSS), and Files (JavaScript).
+---
+
+## 📁 Repository structure
+
+```
+apex-profile-bar-plugin/
+├── src/
+│   ├── profile_bar.sql           # PL/SQL render function (plugin Source)
+│   ├── profile_bar.css           # plugin file: styles and animations
+│   └── profile_bar.js            # plugin file: SH_USER_MENU behavior
+├── docs/images/                  # screenshots used in this README
+├── CHANGELOG.md
+├── LICENSE                       # MIT
+└── README.md
+```
+
+> ⚠️ **Note:** To install the plugin into your own APEX workspace, follow the steps below and paste each file into the matching section of the plugin definition — Source, Files (CSS) and Files (JavaScript).
 
 ---
 
@@ -64,7 +94,7 @@ Head to **Shared Components → Plug-ins → Create**. This time the Type is **R
 
 ## 2. Add the PL/SQL Render Function
 
-Region plugins use a **function**, not a procedure, returning `apex_plugin.t_region_render_result`. Set the Render Function Type to **PL/SQL Code** and paste the full contents of [`profile_bar.sql`](./profile_bar.sql) into the **Source** section.
+Region plugins use a **function**, not a procedure, returning `apex_plugin.t_region_render_result`. Set the Render Function Type to **PL/SQL Code** and paste the full contents of [`profile_bar.sql`](./src/profile_bar.sql) into the **Source** section.
 
 A few design decisions worth calling out:
 
@@ -72,6 +102,8 @@ A few design decisions worth calling out:
 - **Base64 avatar embedding** — a profile photo stored as a BLOB is fetched, Base64-encoded via `APEX_WEB_SERVICE.BLOB2CLOBBASE64`, and embedded directly as a `data:` URI — no separate image-serving page needed. Above **300 KB** it silently falls back to initials instead.
 - **Bilingual server-side** — the plugin's own fixed strings ("Sign Out", the trigger's aria-label) switch between German and English using `V('BROWSER_LANGUAGE')`.
 - **Query-driven dropdown** — the menu items aren't hardcoded. A developer-supplied SQL query returning 4 columns (`icon`, `text`, `link`, `menu_type`) populates the dropdown; if left blank, a small built-in default query renders instead, so the region never appears empty.
+- **Links just work** — every dropdown link and the Logout Target go through `apex_plugin_util.replace_substitutions` and `apex_util.prepare_url`, so `&APP_ID.`, `&SESSION.`, `&DEBUG.` and page-item substitutions are resolved and session state checksums are added where needed.
+- **Readable hover, automatically** — the hovered item's text color is picked from the *Menu Item Hover Color*: white on a dark hover color, near-black on a light one.
 
 > 💡 **Tip:** Attributes 20 (Width) and 21 (Alignment) are read nowhere in this version — the dropdown panel sizes itself to content (min/max bounds in CSS) instead of a fixed pixel width. If you're rebuilding this from scratch, skip adding those two attributes entirely.
 
@@ -121,7 +153,7 @@ Add every Custom Attribute below. The defaults for First Name, Last Name, Email,
 | Image MIME Type | Profile Image | 600 | 23 | Text | Yes | `SUPER_ADMIN.SUAD_EMAIL.SUAD_PROFILE_MIME` | Profile Image – Show Image |
 | Image Shape | Profile Image | 700 | 3 | Select List | No | ROUND / SQUARE / ROUNDED | Profile Image – Show Image |
 | Border Color | Profile Image | 800 | 5 | Color | No | `#000000` | Profile Image – Show Image |
-| Show Status | Profile Image | 900 | 8 | Yes/No | No | N | — |
+| Show Status | Profile Image | 900 | 8 | Yes/No | No | N | Profile Image – Show Image |
 | Status Color | Profile Image | 1000 | 9 | Color | No | `#22C55E` | Profile Image – Show Status |
 | Show Logout Button | Logout | 100 | 10 | Yes/No | No | N | — |
 | Logout Target | Logout | 200 | 11 | Link to Target Page/URL | No | — | Logout – Show Logout Button |
@@ -135,13 +167,22 @@ Add every Custom Attribute below. The defaults for First Name, Last Name, Email,
 | Menu Item Hover Color | Dropdown Menu | 500 | 18 | Color | No | `#F3F4F6` | Dropdown Menu – Enable Dropdown |
 | Text Color | Dropdown Menu | 600 | 19 | Color | No | `#111827` | Dropdown Menu – Enable Dropdown |
 
+> 💡 **Good to know:**
+> - **Show Status** draws the dot on the avatar, so it depends on **Show Image** = Yes.
+> - **Image MIME Type** accepts a `TABLE.MATCH.VALUE` lookup *or* a literal value such as `image/jpeg`. Anything that isn't a valid `image/...` type falls back to `image/png`.
+> - **Logout Target** can be any page or URL, including substitutions (`&APP_ID.`, `&SESSION.`). Left empty, it uses APEX's built-in `LOGOUT` request.
+> - **Logout Icon** left empty falls back to `fa-sign-out`.
+> - **Logout Position = Inside** needs the dropdown. If **Enable Dropdown** is No, the logout button is shown outside instead, so it never disappears.
+> - **Menu Item Hover Color** also sets the hover text color automatically (white or near-black), so any color you pick stays readable.
+> - Attribute 4 (avatar size) is optional — if you don't add it, the avatar is 28 px.
+
 > ✅ **Dropdown Menu Query default:** if left blank, the render function falls back to its own built-in 2-item query (Settings + Campus Administrator, both pointing at placeholder pages). The moment you supply your own SQL — returning `icon`, `dropdown_text`, `link`, `menu_type` in that order — it fully replaces the default, including support for sub-items (`menu_type = 'SUB'`, indented) and per-icon colors (`fa-star|#F59E0B`).
 
 ---
 
 ## 7. Add the CSS File
 
-Under **Files**, create `profile_bar.css` and paste the contents of [`profile_bar.css`](./profile_bar.css).
+Under **Files**, create `profile_bar.css` and paste the contents of [`profile_bar.css`](./src/profile_bar.css).
 
 The most interesting pieces are the **four logout button style variants** — all switched purely by a CSS class, no JS involvement — and the **swipe-in / swipe-out** keyframe animations for the dropdown panel:
 
@@ -156,7 +197,7 @@ The most interesting pieces are the **four logout button style variants** — al
 
 ## 8. Add the JavaScript File
 
-Now create `profile_bar.js` and paste the contents of [`profile_bar.js`](./profile_bar.js).
+Now create `profile_bar.js` and paste the contents of [`profile_bar.js`](./src/profile_bar.js).
 
 The whole thing is wrapped in a `SH_USER_MENU` namespace with a single `init(wrapperId)` entry point, called once per region instance from the render function's `apex_javascript.add_onload_code`. Three details worth flagging:
 
@@ -229,11 +270,43 @@ Save and run the page. Click the avatar — the panel swipes in from the right w
 - **Four logout styles, zero JS branching** — the visual variant is controlled purely by which CSS class gets attached, driven by one Select List attribute
 - **Portal + proper animation timing** — the panel lives in `<body>` so no navbar can clip it, and closing waits out its own CSS animation instead of snapping the class off mid-frame
 - **Graceful image handling** — a profile photo above 300 KB silently falls back to initials rather than bloating the page or throwing an error
+- **Safe defaults everywhere** — links resolve substitutions, hover text stays readable with any color, and the logout button never disappears whatever combination of settings is chosen
 
 ---
 
-That's the full build — from an empty region plugin to a production-ready user menu with DB-driven identity, Base64 avatars, a fully custom dropdown, and four logout button looks to choose from. If you build this into your own navbar, feel free to open an issue and share which Logout Style you end up going with!
+## 📸 Screenshots
 
-🙏 **A quick thanks** — this plugin wouldn't be where it is without **Sajjad Hanifa**, who's been a huge help shaping these features and pushing me to build them right. Really appreciate the support!
+<p align="center">
+  <img src="docs/images/profile-bar-dropdown.png" alt="Profile Bar dropdown open with avatar, name, email, menu items and Sign Out" width="283"><br>
+  <em>The finished result — dropdown open, Sign Out inside the panel</em>
+</p>
 
-📌 **Stay tuned** — more Oracle APEX plugins and tutorials are coming. Read the original write-up for this plugin on [APEX with Hassaan](https://apexwithhassaan.vercel.app/blog/profile-bar-region-plugin).
+<p align="center">
+  <img src="docs/images/profile-bar-page-designer.png" alt="Page Designer attributes used for the Profile Bar" width="490"><br>
+  <em>The Page Designer configuration behind it — every attribute set once</em>
+</p>
+
+---
+
+That's the full build — from an empty region plugin to a production-ready user menu with DB-driven identity, Base64 avatars, a fully custom dropdown, and four logout button looks to choose from. If you build this into your own navbar, feel free to open an issue and share which Logout Style you go with!
+
+---
+
+## 📝 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+---
+
+## 📄 License
+
+Released under the [MIT License](LICENSE) — free to use, modify and redistribute in personal and commercial projects.
+
+---
+
+## 🙏 Credits
+
+Built by **Hassaan Ahmed Tahir** — Senior Oracle APEX Developer.
+Special thanks to **Sajjad Hanifa** for his continued guidance and support in shaping these features and building them right.
+
+📌 Read the full step-by-step write-up on **[APEX with Hassaan](https://apexwithhassaan.vercel.app/blog/profile-bar-region-plugin)**, and keep an eye on the blog for more Oracle APEX plugins and tutorials.

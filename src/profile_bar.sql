@@ -3,7 +3,7 @@
 -- ------------------------------------------------------------------
 -- Component : Render Function ("PL/SQL Code" - Component Definition ->
 --             Callbacks -> Render Function Type = PL/SQL Code)
--- Version   : 1.2.0
+-- Version   : 1.3.0
 -- Author    : S&H Software Solutions
 -- License   : MIT License. This code is free and open to use, modify,
 --             and redistribute, with or without attribution, for
@@ -34,7 +34,7 @@ IS
     v_status_color_attr   VARCHAR2(20)   := p_region.attribute_09;
     v_show_logout         VARCHAR2(4)    := NVL(p_region.attribute_10, 'Y');
     v_logout_link_attr    VARCHAR2(4000) := p_region.attribute_11;
-    v_logout_icon_raw     VARCHAR2(200)  := NVL(p_region.attribute_12, 'fa-right-from-bracket');
+    v_logout_icon_raw     VARCHAR2(200)  := NVL(p_region.attribute_12, 'fa-sign-out');
     v_logout_position     VARCHAR2(20)   := NVL(TRIM(p_region.attribute_13), 'OUTSIDE');
     v_show_dropdown       VARCHAR2(4)    := NVL(p_region.attribute_14, 'Y');
     v_dropdown_query      CLOB           := p_region.attribute_15;
@@ -62,7 +62,6 @@ IS
 
     v_image_is_db    BOOLEAN;
     v_img_table  VARCHAR2(128); v_img_match VARCHAR2(128); v_img_value VARCHAR2(128);
-    v_mime_table VARCHAR2(128); v_mime_match VARCHAR2(128); v_mime_value VARCHAR2(128);
     v_image_blob     BLOB;
     v_image_mime     VARCHAR2(200);
     v_image_base64   CLOB;
@@ -85,6 +84,9 @@ IS
 
     v_is_outside_logout BOOLEAN;
     v_is_inside_logout  BOOLEAN;
+    v_logout_url        VARCHAR2(4000);
+    v_panel_hover_text  VARCHAR2(20);
+    v_panel_vars        VARCHAR2(400);
     v_result apex_plugin.t_region_render_result;
 
     ------------------------------------------------------------------
@@ -248,6 +250,46 @@ IS
             v_pos := v_pos + v_amt;
         END LOOP;
     END p_print_clob;
+
+    -- Turns a developer-supplied link (dropdown query "link" column or
+    -- the Logout Target attribute) into a working URL: first replaces
+    -- substitution strings such as &APP_ID. / &SESSION. / &DEBUG.
+    -- (not escaped here - the result is escaped once, when written
+    -- into the HTML attribute), then adds the session state checksum
+    -- via prepare_url where one is needed.
+    FUNCTION f_prepare_link (pi_link IN VARCHAR2) RETURN VARCHAR2
+    IS BEGIN
+        IF pi_link IS NULL THEN RETURN NULL; END IF;
+        RETURN apex_util.prepare_url(
+                   p_url => apex_plugin_util.replace_substitutions(
+                                p_value  => pi_link,
+                                p_escape => FALSE));
+    END f_prepare_link;
+
+    -- Picks a readable text color for a hovered menu item: white on a
+    -- dark hover background, near-black on a light one (perceived
+    -- brightness, ITU-R BT.601). Expects a color already validated by
+    -- f_color (#RGB or #RRGGBB).
+    FUNCTION f_contrast_text (pi_bg IN VARCHAR2) RETURN VARCHAR2
+    IS
+        v_hex VARCHAR2(6);
+        v_r NUMBER; v_g NUMBER; v_b NUMBER;
+    BEGIN
+        v_hex := UPPER(LTRIM(pi_bg, '#'));
+        IF LENGTH(v_hex) = 3 THEN
+            v_hex := SUBSTR(v_hex, 1, 1) || SUBSTR(v_hex, 1, 1) ||
+                     SUBSTR(v_hex, 2, 1) || SUBSTR(v_hex, 2, 1) ||
+                     SUBSTR(v_hex, 3, 1) || SUBSTR(v_hex, 3, 1);
+        END IF;
+        v_r := TO_NUMBER(SUBSTR(v_hex, 1, 2), 'XX');
+        v_g := TO_NUMBER(SUBSTR(v_hex, 3, 2), 'XX');
+        v_b := TO_NUMBER(SUBSTR(v_hex, 5, 2), 'XX');
+        IF (0.299 * v_r + 0.587 * v_g + 0.114 * v_b) < 150 THEN
+            RETURN '#FFFFFF';
+        END IF;
+        RETURN '#111827';
+    EXCEPTION WHEN OTHERS THEN RETURN '#111827';
+    END f_contrast_text;
 BEGIN
     v_app_user := V('APP_USER');
 
@@ -288,10 +330,14 @@ BEGIN
                 apex_debug.warn(p_message => 'SH_USER_MENU: profile image for %s is %s bytes (max %s) - falling back to initials.',
                     p0 => v_img_table, p1 => TO_CHAR(DBMS_LOB.GETLENGTH(v_image_blob)), p2 => TO_CHAR(c_max_image_bytes));
             ELSE
-                IF f_parse_table_match_value(v_image_mime_attr, v_mime_table, v_mime_match, v_mime_value) THEN
-                    v_image_mime := f_lookup_value(v_mime_table, v_mime_match, v_mime_value, v_app_user);
+                -- MIME type: a TABLE.MATCH.VALUE lookup OR a literal value
+                -- such as "image/jpeg". Anything that isn't a valid image
+                -- MIME type falls back to image/png.
+                v_image_mime := TRIM(f_resolve_text(v_image_mime_attr, v_app_user));
+                IF v_image_mime IS NULL
+                   OR NOT REGEXP_LIKE(v_image_mime, '^image/[A-Za-z0-9.+-]+$') THEN
+                    v_image_mime := 'image/png';
                 END IF;
-                IF v_image_mime IS NULL THEN v_image_mime := 'image/png'; END IF;
 
                 v_image_base64 := APEX_WEB_SERVICE.BLOB2CLOBBASE64(p_blob => v_image_blob);
                 v_image_data_uri := 'data:' || apex_escape.html_attribute(v_image_mime) || ';base64,' || v_image_base64;
@@ -305,14 +351,27 @@ BEGIN
     v_wrapper_id := 'sh-um-' || v_static_id;
     v_panel_id   := 'sh-um-panel-' || v_static_id;
 
-    v_is_outside_logout := (v_show_logout = 'Y' AND v_logout_position = 'OUTSIDE');
-    v_is_inside_logout  := (v_show_logout = 'Y' AND v_logout_position = 'INSIDE');
+    -- "Inside" needs the dropdown panel. If the dropdown is disabled,
+    -- the logout button is shown OUTSIDE instead, so it never vanishes.
+    v_logout_position   := UPPER(v_logout_position);
+    v_is_inside_logout  := (v_show_logout = 'Y' AND v_logout_position = 'INSIDE' AND v_show_dropdown = 'Y');
+    v_is_outside_logout := (v_show_logout = 'Y' AND NOT v_is_inside_logout);
 
     -- No Logout Target configured -> fall back to APEX's built-in
     -- LOGOUT request.
     IF v_logout_link_attr IS NULL THEN
         v_logout_link_attr := apex_page.get_url(p_request => 'LOGOUT');
     END IF;
+    v_logout_url := f_prepare_link(v_logout_link_attr);
+
+    -- Dropdown colors as CSS custom properties (shared by the wrapper
+    -- and the panel). Hover text color is derived automatically.
+    v_panel_hover_text := f_contrast_text(f_color(v_dropdown_hover_attr, '#F3F4F6'));
+    v_panel_vars :=
+        '--sh-um-panel-bg:'         || f_color(v_dropdown_bg_attr, '#FFFFFF')    || ';' ||
+        '--sh-um-panel-hover:'      || f_color(v_dropdown_hover_attr, '#F3F4F6') || ';' ||
+        '--sh-um-panel-hover-text:' || v_panel_hover_text                        || ';' ||
+        '--sh-um-panel-text:'       || f_color(v_dropdown_text_attr, '#111827')  || ';';
 
     ----------------------------------------------------------------
     -- Load dropdown entries from the developer's SQL query. Falls
@@ -352,7 +411,7 @@ BEGIN
         v_items_html := v_items_html ||
             '<div class="sh-um-item' ||
             CASE WHEN UPPER(v_type_tab(i)) = 'SUB' THEN ' sh-um-item--sub' ELSE NULL END ||
-            '" data-link="' || apex_escape.html_attribute(apex_util.prepare_url(p_url => v_link_tab(i))) || '" ' ||
+            '" data-link="' || apex_escape.html_attribute(f_prepare_link(v_link_tab(i))) || '" ' ||
             'role="menuitem" tabindex="-1">' ||
             '<span class="sh-um-item-icon">' || f_render_icon_span(v_icons(i)) || '</span>' ||
             '<span class="sh-um-item-text">' || apex_escape.html(v_text_tab(i)) || '</span>' ||
@@ -363,7 +422,7 @@ BEGIN
         v_items_html := v_items_html ||
             '<div class="sh-um-separator"></div>' ||
             '<div class="sh-um-item sh-um-item--logout" data-link="' ||
-            apex_escape.html_attribute(apex_util.prepare_url(p_url => v_logout_link_attr)) || '" role="menuitem" tabindex="-1">' ||
+            apex_escape.html_attribute(v_logout_url) || '" role="menuitem" tabindex="-1">' ||
             '<span class="sh-um-item-icon">' || f_render_icon_span(v_logout_icon_raw) || '</span>' ||
             '<span class="sh-um-item-text">' || f_txt('Abmelden', 'Sign Out') || '</span>' ||
             '</div>';
@@ -374,9 +433,7 @@ BEGIN
     ----------------------------------------------------------------
     v_html := '<div id="' || v_wrapper_id || '" class="sh-um-wrapper" ' ||
         'data-um-align="RIGHT" ' ||
-        'style="--sh-um-panel-bg:' || f_color(v_dropdown_bg_attr, '#FFFFFF') || ';' ||
-               '--sh-um-panel-hover:' || f_color(v_dropdown_hover_attr, '#F3F4F6') || ';' ||
-               '--sh-um-panel-text:' || f_color(v_dropdown_text_attr, '#111827') || ';">';
+        'style="' || v_panel_vars || '">';
 
     v_html := v_html || '<div class="sh-um-trigger" tabindex="0" role="button" ' ||
         'aria-haspopup="true" aria-expanded="false" aria-label="' ||
@@ -431,7 +488,7 @@ BEGIN
     IF v_is_outside_logout THEN
         v_html := v_html || '<a class="sh-um-logout-outside sh-um-logout-outside--' ||
             LOWER(v_logout_style) || '" href="' ||
-            apex_escape.html_attribute(apex_util.prepare_url(p_url => v_logout_link_attr)) ||
+            apex_escape.html_attribute(v_logout_url) ||
             '" aria-label="' || apex_escape.html_attribute(f_txt('Abmelden', 'Sign Out')) ||
             '" title="' || apex_escape.html_attribute(f_txt('Abmelden', 'Sign Out')) || '">' ||
             f_render_icon_span(v_logout_icon_raw);
@@ -452,9 +509,7 @@ BEGIN
         v_html := v_html ||
             '<div id="' || v_panel_id || '" class="sh-um-panel" role="menu" ' ||
             'aria-hidden="true" ' ||
-            'style="--sh-um-panel-bg:' || f_color(v_dropdown_bg_attr, '#FFFFFF') || ';' ||
-                   '--sh-um-panel-hover:' || f_color(v_dropdown_hover_attr, '#F3F4F6') || ';' ||
-                   '--sh-um-panel-text:' || f_color(v_dropdown_text_attr, '#111827') || ';">' ||
+            'style="' || v_panel_vars || '">' ||
             '<div class="sh-um-panel-items">' || v_items_html || '</div>' ||
             '</div>';
     END IF;
@@ -468,7 +523,7 @@ BEGIN
     END IF;
 
     IF v_show_dropdown = 'Y' THEN
-        apex_javascript.add_onload_code(p_code => 'SH_USER_MENU.init(' || apex_javascript.add_value(v_wrapper_id) || ');');
+        apex_javascript.add_onload_code(p_code => 'SH_USER_MENU.init(' || apex_javascript.add_value(v_wrapper_id, FALSE) || ');');
     END IF;
 
     RETURN v_result;
